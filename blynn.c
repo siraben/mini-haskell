@@ -2,7 +2,7 @@ typedef unsigned u;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+
 enum { FORWARD = 27, REDUCING = 9 };
 
 void die(char *s) {

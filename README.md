@@ -1,9 +1,9 @@
 # A compiler for a subset of Haskell to Combinatory Logic
 ## Adapted from the original version by Ben Lynn
 This is an elaboration and annotation of [Ben Lynn's Haskell
-compiler](Ben Lynn's Haskell compiler and ) and [C
-VM](https://crypto.stanford.edu/~blynn/compiler/c.html).  The main aim
-is to improve upon the compiler, firstly its structure and later
+compiler](https://crypto.stanford.edu/~blynn/compiler/type.html) and
+[C VM](https://crypto.stanford.edu/~blynn/compiler/c.html).  The main
+aim is to improve upon the compiler, firstly its structure and later
 optimizations to the generated code.
 
 ## Usage
@@ -19,7 +19,8 @@ to write the output to.
 - A C compiler and `make`.  That's it!
 
 ### Testing
-To check self-compilation, run `check.sh`.  It does the following:
+To check self-compilation, run `./check.sh classy.hs`.  It does the
+following:
 
 - Run `classy` (compiler binary) on `classy.hs` (compiler source),
   producing `classy2`
@@ -27,9 +28,9 @@ To check self-compilation, run `check.sh`.  It does the following:
 - Check that `classy2` and `classy3` are identical.
 
 If you've made a change to what `classy.hs` _outputs_, (e.g. an
-optimization to code generation), run `check_compile.sh` instead.  It
-adds another step to the same process in `check.sh` to ensure that the
-changes propagate.
+optimization to code generation), run `./check_compile.sh classy.hs`
+instead.  It adds another step to the same process in `check.sh` to
+ensure that the changes propagate.
 
 ## Ideas for improvement
 ### C runtime
