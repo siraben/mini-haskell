@@ -548,9 +548,9 @@ data Sem = Defer | Closed Ast | Need Sem | Weak Sem;
 -- ($$), case Defer
 -- Parameters: r == self
 ldef r y = case y of
-  { -- ??
+  { -- (V, V)   -> N (C S.(S $! I $! I))
     Defer    -> Need (Closed (A (A (R "S") (R "I")) (R "I")))
-    -- (C d, V) -> N (C d)
+    -- (V, C d) -> N (C S.(kC $! kI $! d))
   ; Closed d -> Need (Closed (A (R "T") d))
     -- (V, N e) -> N (C S.(kS $! kI) $$ e)
   ; Need e   -> Need (r (Closed (A (R "S") (R "I"))) e)
@@ -605,7 +605,7 @@ babsa x y = case x of
   ; Weak e   -> lwea babsa e y
   };
 
--- Full bracket abstraction algorithm, from De Brujn to combinators
+-- Full bracket abstraction algorithm, from De Bruijn to combinators
 -- babs :: LC -> Sem
 babs t = case t of
   { -- let z : (a*y, a) repr = V

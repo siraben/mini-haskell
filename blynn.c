@@ -212,11 +212,13 @@ void run(u (*get)(), void (*put)(u)) {
         lazy(3, apparg(2, 3), arg(1));
         break;
       case 'I':
+        // id
         // I x = x
         sp[1] = arg(1);
         sp++;
         break;
       case 'T':
+        // (&)
         // T x y = y x
         lazy(2, arg(2), arg(1));
         break;
@@ -225,11 +227,11 @@ void run(u (*get)(), void (*put)(u)) {
         lazy(2, 'I', arg(1));
         break;
       case ':':
+        // "cons"
         // : a b c d = (d a) b
         lazy(4, apparg(4, 1), arg(2));
         break;
       case '0':
-        // 0 =
         // Read a character c from the input
         // If c == 0, then I K (represents nil)
         // else : (# c) (0 ?)  (represents a list of the first
@@ -265,6 +267,17 @@ void run(u (*get)(), void (*put)(u)) {
         break;
       case '-':
         lazy(2, '#', num(1) - num(2));
+        break;
+      case 'G':
+        // getc k w = k n w
+        // Where k is the continuation, w is the "world"
+        lazy(2, app(arg(1), getchar()), arg(2));
+        break;
+      case 'P':
+        // putc n k w = k w
+        // k is the continuation, w is the "world"
+        putchar(num(1));
+        lazy(3, arg(2),arg(3));
         break;
       default:
         printf("?%u\n", x);
@@ -328,7 +341,7 @@ u getc_stdin() { return getchar(); }
 void init_vm() {
   mem = arena[0];
   altmem = arena[1];
-  buf_end = buf + BUFMAX;
+pp  buf_end = buf + BUFMAX;
   spTop = mem + TOP - 1;
   strcpy(buf, "I;");
   bufptr = buf + 2;
@@ -352,8 +365,6 @@ void get_input() {
   } while (input[0] == '\0');
 }
 int main(int argc, const char **argv) {
-  srand(time(0));
-  rand();
   if (argc != 4) {
     printf("Usage: ./blynn <binary> <input> <output>\n");
     exit(1);

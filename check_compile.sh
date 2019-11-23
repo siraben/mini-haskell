@@ -5,10 +5,14 @@
 # times to propagate that change.
 check_compile() {
     make
-    echo 'n' | timeout 10 ./blynn classy $1 classy2 &&
-    echo 'n' | timeout 10 ./blynn classy2 $1 classy3 &&
-    echo 'n' | timeout 10 ./blynn classy3 $1 classy4 &&
+    echo 'n' | timeout 10 ./blynn classy "$1" classy2 &&
+    echo 'n' | timeout 10 ./blynn classy2 "$1" classy3 &&
+    echo 'n' | timeout 10 ./blynn classy3 "$1" classy4 &&
     printf '\n' && diff -qs classy3 classy4;
 } 
-
-check_compile $1
+if [[ $1 == "" ]]
+then
+    echo "./check_compile.sh <compiler source>"
+    exit
+fi
+check_compile "$1"
