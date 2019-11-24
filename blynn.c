@@ -16,7 +16,7 @@ char input[BUFMAX] = {0};
 u *mem, *altmem, *sp, *spTop, hp, tab[TABMAX], tabn;
 u gc_count;
 void stats() {
-  printf("[HP = %u, Stack usage = %ld, GC called %u times]\n", hp, spTop - sp,
+  printf("[HP = %u, Stack usage = %p, GC called %u times]\n", hp, (void*)(spTop - sp),
          gc_count);
 }
 
@@ -268,6 +268,14 @@ void run(u (*get)(), void (*put)(u)) {
       case '-':
         lazy(2, '#', num(1) - num(2));
         break;
+      case '|':
+        lazy(2, '#', num(1) | num(2));
+        break;
+      case '&':
+        lazy(2, '#', num(1) & num(2));
+        break;
+      case '^':
+        lazy(2, '#', num(1) ^ num(2));        
       case 'G':
         // getc k w = k n w
         // Where k is the continuation, w is the "world"
@@ -341,7 +349,7 @@ u getc_stdin() { return getchar(); }
 void init_vm() {
   mem = arena[0];
   altmem = arena[1];
-pp  buf_end = buf + BUFMAX;
+  buf_end = buf + BUFMAX;
   spTop = mem + TOP - 1;
   strcpy(buf, "I;");
   bufptr = buf + 2;

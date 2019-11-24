@@ -36,16 +36,14 @@ Types
 [ ] Multi-parameter typeclasses
 [ ] Dependent/linear types?
 -}
--- To run in GHC, uncomment the following block and change
--- infixr 5 : , ++;
--- to
--- infixr 5 ++;
+
+-- Delete code below and uncomment the block to compile in GHC
 {-
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 module Compiler where
-import Prelude ((+), (-), (*), Char, Int, String, succ)
+import Prelude (Char, Int, String, succ)
 import Data.Char (chr, ord)
 import qualified Prelude
 a <= b = if a Prelude.<= b then True else False
@@ -53,14 +51,36 @@ a <= b = if a Prelude.<= b then True else False
 (%) = Prelude.mod
 class Eq a where { (==) :: a -> a -> Bool };
 class Show a where { show :: a -> String };
+class Functor f where { fmap :: (a -> b) -> f a -> f b };
+class Applicative f where { pure :: a -> f a; (<*>) :: f (a -> b) -> f a -> f b };
+class Monad m where { return :: a -> m a ; (>>=) :: m a -> (a -> m b) -> m b};
 instance Eq Char where { (==) x y = if x Prelude.== y then True else False };
 instance Eq Int where { (==) x y = if x Prelude.== y then True else False };
+infixr 5 ++;
+infixr 9 .;
+infixl 4 <**> , <*> , <$$> , <$> , <* , *>;
+infixl 3 <|>;
+infixr 0 $;
+infixl 7  * ;
+infixl 6  +, - ;
+(*) = (Prelude.*);
+(+) = (Prelude.+);
+(-) = (Prelude.-);
 -}
 infixr 5 :, ++;
 infixr 9 .;
 infixl 4 <**> , <*> , <$$> , <$> , <* , *>;
 infixl 3 <|>;
 infixr 0 $;
+infixl 7  * ;
+infixl 6  +, - ;
+(*) = (.*.);
+(+) = (.+.);
+(-) = (.-.);
+(%) = (.%.);
+(/) = (./.);
+-- Delete code above and uncomment the block to compile in GHC
+
 undefined = undefined;
 ($) f = f;
 id x = x;
@@ -489,7 +509,7 @@ prims =
       , ("ord", (ii, R "I"))
       , ("succ", (ii, R "`T`(1)+"))
       ] ++
-      map (\s -> (s, (iii, bin s))) ["+", "-", "*", "/", "%"];
+      map (\s -> ('.':s ++ ".", (iii, bin s))) ["+", "-", "*", "/", "%"];
 
 ifz n = ife (0 == n);
 showInt' n = ifz n id (showInt' (n/10) . (:) (chr (48+(n%10))));
