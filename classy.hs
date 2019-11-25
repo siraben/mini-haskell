@@ -40,8 +40,8 @@ infixr 9 .;
 infixl 4 <**> , <*> , <$$> , <$> , <* , *>;
 infixl 3 <|>;
 infixr 0 $;
-infixl 7  * ;
-infixl 6  +, - ;
+infixl 7 * ;
+infixl 6 + , - ;
 (*) = (.*.);
 (+) = (.+.);
 (-) = (.-.);
@@ -94,7 +94,8 @@ instance Monad Maybe where
 fromMaybe a m = case m of { Nothing -> a; Just x -> x };
 unmaybe = fromMaybe undefined;
 foldr c n l = flst l n (\h t -> c h (foldr c n t));
-foldr1 c l =
+-- foldr1' :: (a -> a -> a) -> [a] -> Maybe a
+foldr1' c l =
     flst
        l
        Nothing
@@ -109,7 +110,6 @@ foldr1 c l =
             l);
 
 foldl f a bs = foldr (\b g x -> g (f x b)) id bs a;
--- Total variant
 -- foldl1' :: (p -> p -> p) -> [p] -> Maybe p
 foldl1' f l = flst l Nothing (\x xs -> Just (foldl f x xs));
 elem k = foldr (\x t -> ife (x == k) True t) False;
@@ -174,7 +174,11 @@ sepBy1 p sep = parserLiftA2 (:) p (many (sep *> p));
 sepBy p sep = sepBy1 p sep <|> parserpure [];
 
 char c = sat (== c);
-string s = case s of { [] -> parserpure s ; (:) c cs -> char c *> string cs *> parserpure s};
+string s =
+  case s of
+  { [] -> parserpure s
+  ; (:) c cs -> char c *> string cs *> parserpure s};
+
 between x y p = x *> (p <* y);
 -- Parse line comments
 com = char '-' *> between (char '-') (char '\n') (many (sat (/= '\n')));
@@ -234,7 +238,10 @@ thenComma r =
 
 -- Sections
 parenExpr r =
-  parserLiftA2 (&) r (((\v a -> A (V v) a) <$$> op) <|> thenComma r <|> parserpure id);
+  parserLiftA2
+    (&)
+    r
+    (((\v a -> A (V v) a) <$$> op) <|> thenComma r <|> parserpure id);
 
 rightSect r =
   ((\v a -> A (A (V "\\C") (V v)) a) <$$> (op <|> (pure <$$> spch ','))) <**> r;
@@ -343,7 +350,7 @@ arr a = TAp (TAp (TC "->") a);
 
 bType r = unmaybe . foldl1' TAp <$$> many1 r;
 
-_type r = unmaybe . foldr1 arr <$$> sepBy (bType r) (spc (want opLex "->"));
+_type r = unmaybe . foldr1' arr <$$> sepBy (bType r) (spc (want opLex "->"));
 typeConstant =
   (\s -> ife (s == "String") (TAp (TC "[]") (TC "Int")) (TC s)) <$$> conId;
 
@@ -391,10 +398,14 @@ classDecl =
 inst = _type aType;
 
 -- Instance declarations
-instDecl r = keyword "instance" *>
+instDecl r =
+  keyword "instance" *>
   ((\ps cl ty defs -> Inst cl (Qual ps ty) defs) <$$>
-  (parserLiftA2 ((pure .) . Pred) conId (inst <* want op "=>") <|> parserpure [])
-    <**> conId <**> inst <**> (keyword "where" *> braceSep (def r)));
+   (parserLiftA2 ((pure .) . Pred) conId (inst <* want op "=>") <|>
+    parserpure []) <**>
+   conId <**>
+   inst <**>
+   (keyword "where" *> braceSep (def r)));
 
 tops precTab =
   sepBy
@@ -657,11 +668,8 @@ mgu unify t u = case t of
     }
   };
 
--- parserfmap for maybe
-maybeMap f = maybe Nothing (Just . f);
-
 unify a b =
-  maybe Nothing (\s -> maybeMap (@@ s) (mgu unify (apply s a) (apply s b)));
+  maybe Nothing (\s -> fmap (@@ s) (mgu unify (apply s a) (apply s b)));
 
 -- instantiate' ::
 --   Type -> Int -> [(String, Type)] -> ((Type, Int), [(String, Type)])
@@ -900,7 +908,7 @@ inferDefs ienv defs typed =
         fpair def $ \s expr ->
           fpair (infer' typed [] (maybeFix s expr) (Just [], 0)) $ \ta msn ->
             fpair msn $ \ms _ ->
-              case maybeMap (prove ienv ta) ms of
+              case fmap (prove ienv ta) ms of
               { Nothing -> Left ("bad type: " ++ s)
               ; Just qa -> inferDefs ienv rest ((s, qa) : typed)}
     ; Right inst -> inferDefs ienv rest (inferInst ienv typed inst : typed)};

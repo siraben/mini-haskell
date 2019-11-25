@@ -1,4 +1,5 @@
 # A compiler for a subset of Haskell to Combinatory Logic
+[![Build Status](https://travis-ci.org/siraben/mini-haskell.svg?branch=master)](https://travis-ci.org/siraben/mini-haskell)
 ## Adapted from the original version by Ben Lynn
 This is an elaboration and annotation of [Ben Lynn's Haskell
 compiler](https://crypto.stanford.edu/~blynn/compiler/type.html) and
