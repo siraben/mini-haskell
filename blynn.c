@@ -16,7 +16,7 @@ char input[BUFMAX] = {0};
 u *mem, *altmem, *sp, *spTop, hp, tab[TABMAX], tabn;
 u gc_count;
 void stats() {
-  printf("[HP = %u, Stack usage = %p, GC called %u times]\n", hp, (void*)(spTop - sp),
+  printf("[HP = %u, SP = %p, GC called %u times]\n", hp, (void*)(spTop - sp),
          gc_count);
 }
 

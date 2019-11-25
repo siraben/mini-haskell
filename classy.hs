@@ -2,41 +2,6 @@
 -- A mini Haskell compiler with typeclasses.
 -- Originally written by Ben Lynn, modified by Ben Siraphob
 ------------------------------------------------------------------------
-{-
-Ideas for improvements (listed rough order of difficulty for each
-section)
-
-C runtime
-=========
-[ ] Monadic I/O
-  [ ] putc, getc, filesystems
-[ ] Rewrite in Forth?
-
-Compiler
-========
-[ ] Now that we have bootstrapped, use more typeclasses in this
-  compiler (but ensure bootstrapping paths still work)
-  + Parser combinators should be a typeclass
-  + Rewrite sections in monadic style?
-[ ] Remove undefined, only use total functions
-[ ] "Don't pay for what you don't use" (only emit code for functions
-  - referenced from main)
-
-Parser
-======
-[x] Add block comments
-[ ] Better parser error messages
-[ ] do-notation (i.e. "monadic mode")?
-
-Types
-=====
-[ ] Add more to the standard prelude
-[ ] Allow class constraint in class declaration
-    like (class Functor f => Applicative f where ...)
-[ ] Multi-parameter typeclasses
-[ ] Dependent/linear types?
--}
-
 -- Delete code below and uncomment the block to compile in GHC
 {-
 {-# LANGUAGE CPP #-}
@@ -47,6 +12,9 @@ import Prelude (Char, Int, String, succ)
 import Data.Char (chr, ord)
 import qualified Prelude
 a <= b = if a Prelude.<= b then True else False
+(*) = (Prelude.*)
+(+) = (Prelude.+)
+(-) = (Prelude.-)
 (/) = Prelude.div
 (%) = Prelude.mod
 class Eq a where { (==) :: a -> a -> Bool };
@@ -80,7 +48,6 @@ infixl 6  +, - ;
 (%) = (.%.);
 (/) = (./.);
 -- Delete code above and uncomment the block to compile in GHC
-
 undefined = undefined;
 ($) f = f;
 id x = x;
@@ -126,24 +93,8 @@ instance Monad Maybe where
   { return = Just ; (>>=) ma f = maybe Nothing f ma };
 fromMaybe a m = case m of { Nothing -> a; Just x -> x };
 unmaybe = fromMaybe undefined;
-foldr c n l = flst l n (\h t -> c h(foldr c n t));
--- foldr1 c l =
---   fromMaybe
---     undefined
---     (flst
---        l
---        undefined
---        (\h t ->
---           foldr
---             (\x m ->
---                Just
---                  (case m of
---                   { Nothing -> x
---                   ; Just y -> c x y}))
---             Nothing
---             l));
--- Replace foldr1 with this total variant, eventually.
-foldr1' c l =
+foldr c n l = flst l n (\h t -> c h (foldr c n t));
+foldr1 c l =
     flst
        l
        Nothing
@@ -158,16 +109,15 @@ foldr1' c l =
             l);
 
 foldl f a bs = foldr (\b g x -> g (f x b)) id bs a;
--- foldl1 f bs = flst bs undefined (foldl f);
 -- Total variant
 -- foldl1' :: (p -> p -> p) -> [p] -> Maybe p
-foldl1' f l = case l of { [] -> Nothing ; (:) x xs -> Just $ foldl f x xs };
+foldl1' f l = flst l Nothing (\x xs -> Just (foldl f x xs));
 elem k = foldr (\x t -> ife (x == k) True t) False;
 find f = foldr (\x t -> ife (f x) (Just x) t) Nothing;
 concat = foldr (++) [];
 itemize c = [c];
-map = flip (foldr . ((:) .)) [];
-concatMap = (concat .) . map;
+map f = foldr (\x xs -> f x : xs) [];
+concatMap f l = concat (map f l);
 instance Functor [] where { fmap = map };
 instance Monad [] where { return = itemize ; (>>=) = flip concatMap };
 instance Applicative [] where
@@ -302,7 +252,8 @@ isFree v expr = case expr of
 
 maybeFix s x = ife (isFree s x) (A (V "\\Y") (L s x)) x;
 
-def r = parserLiftA2 (,) var (flip (foldr L) <$$> many varId <**> (spch '=' *> r));
+def r =
+  parserLiftA2 (,) var (flip (foldr L) <$$> many varId <**> (spch '=' *> r));
 
 -- Convert a list of let bindings and the let body into a single AST.
 addLets ls x =
@@ -310,7 +261,10 @@ addLets ls x =
 
 -- Parse lets
 letin r =
-  parserLiftA2 addLets (between (keyword "let") (keyword "in") (braceSep (def r))) r;
+  parserLiftA2
+    addLets
+    (between (keyword "let") (keyword "in") (braceSep (def r)))
+    r;
 
 atom r =
   letin r                                  <|>
@@ -346,26 +300,6 @@ instance Eq Assoc where { (==) = eqAssoc };
 precOf s precTab = fmaybe (lstLookup s precTab) 5 fst;
 assocOf s precTab = fmaybe (lstLookup s precTab) LAssoc snd;
 opWithPrec precTab n = wantWith (\s -> n == precOf s precTab) op;
--- opFold precTab e xs =
---   case xs of
---   { [] -> e
---   ; (:) x xt ->
---       case find
---              (\y ->
---                 not (assocOf (fst x) precTab == assocOf (fst y) precTab))
---              xt of
---       { Nothing ->
---           case assocOf (fst x) precTab of
---           { NAssoc ->
---               case xt of
---               {  [] -> fpair x (\op y -> A (A (V op) e) y)
---               ;  (:) y yt -> undefined }
---           ; LAssoc -> foldl (\a b -> fpair b (\op y -> A (A (V op) a) y)) e xs
---           ; RAssoc ->
---               foldr (\a b -> fpair a (\op y e -> A (A (V op) e) (b y))) id xs e }
---       ; Just y -> undefined }};
-
--- Total variant
 -- opFold'
 --   :: [(String, (a, Assoc))] -> Ast -> [(String, Ast)] -> Maybe Ast
 opFold' precTab e xs =
@@ -409,7 +343,7 @@ arr a = TAp (TAp (TC "->") a);
 
 bType r = unmaybe . foldl1' TAp <$$> many1 r;
 
-_type r = unmaybe . foldr1' arr <$$> sepBy (bType r) (spc (want opLex "->"));
+_type r = unmaybe . foldr1 arr <$$> sepBy (bType r) (spc (want opLex "->"));
 typeConstant =
   (\s -> ife (s == "String") (TAp (TC "[]") (TC "Int")) (TC s)) <$$> conId;
 
@@ -666,9 +600,12 @@ nolam x = case babs (debruijn [] x) of
 
 dump tab ds =
   case ds of
-  { [] -> []
+  { [] -> return []
   ; (:) h t ->
-    unmaybe (showC tab (unmaybe (nolam (snd h)))) ++ (';' : dump tab t) };
+    nolam (snd h) >>= \a ->
+    showC tab a   >>= \b ->
+    dump tab t    >>= \c ->
+    return (b ++ (';' : c)) };
 
 asm ds = dump ds ds;
 
@@ -1044,4 +981,4 @@ compile s =
     fpair progRest $ \prog rest ->
       case infer prog of
       { Left err  -> err
-      ; Right qas -> asm $ map (second snd) qas};
+      ; Right qas -> unmaybe (asm $ map (second snd) qas)};
