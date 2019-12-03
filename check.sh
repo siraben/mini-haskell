@@ -1,12 +1,23 @@
 #!/bin/bash
 
-# Check that self-compiling works and produces the same output.
-check() {
-    echo 'n' | timeout 10 ./blynn classy "$1" classy2 &&
-    echo 'n' | timeout 10 ./blynn classy2 "$1" classy3 &&
-    printf '\n' && diff -qs classy2 classy3;
+TIMEOUT=60
+# Check that self-compiling works
+stage1() {
+    echo 'n' | timeout $TIMEOUT ./blynn classy "$1" classy2 ||
+        (echo 'Stage 1 fail' && exit 1)
 }
 
+stage2() {
+    echo 'n' | timeout $TIMEOUT ./blynn classy2 "$1" classy3 ||
+        (echo 'Stage 2 fail' && exit 1)
+}
+
+check() {
+    stage1 "$1" &&
+    stage2 "$1" &&
+    printf '\n' &&
+    diff -qs classy2 classy3
+} 
 if [[ $1 == "" ]]
 then
    echo "./check.sh <compiler source>"
