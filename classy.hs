@@ -27,18 +27,15 @@ instance Eq Int where { (==) x y = if x Prelude.== y then True else False };
 infixr 5 ++;
 infixr 9 .;
 infixl 4 <*> , <$> , <* , *>;
-infixl 3 <|>;
+infixl 3 <|>, <||>;
 infixr 0 $;
 infixl 7 *;
 infixl 6 + , -;
-(*) = (Prelude.*);
-(+) = (Prelude.+);
-(-) = (Prelude.-);
 -}
 infixr 5 :, ++;
 infixr 9 .;
 infixl 4 <*> , <$> , <* , *>;
-infixl 3 <|>;
+infixl 3 <|>, <||>;
 infixr 0 $;
 infixl 7 *;
 infixl 6 + , -;
@@ -47,7 +44,6 @@ infixl 6 + , -;
 (-) = (.-.);
 (%) = (.%.);
 (/) = (./.);
--- Delete code above and uncomment the block to compile in GHC
 undefined = undefined;
 ($) f = f;
 id x = x;
@@ -85,6 +81,9 @@ instance Eq a => Eq [a] where { (==) = lstEq };
 (++) xs ys = flst xs ys (\x xt -> x:xt ++ ys);
 -- maybe :: b -> (a -> b) -> Maybe a -> b
 maybe n j m = case m of { Nothing -> n; Just x -> j x };
+-- fold a maybe
+-- fmaybe :: Maybe a -> b -> (a -> b) -> b
+fmaybe m n j = case m of { Nothing -> n; Just x -> j x };
 instance Show a => Show (Maybe a) where
   { show = maybe "Nothing" (\x -> "Just " ++ show x) };
 instance Functor Maybe where
@@ -93,7 +92,7 @@ instance Applicative Maybe where
   { pure = Just ; (<*>) f y = maybe Nothing (`fmap` y) f};
 instance Monad Maybe where
   { return = Just ; (>>=) ma f = maybe Nothing f ma };
-fromMaybe a m = case m of { Nothing -> a; Just x -> x };
+fromMaybe a m = fmaybe m a id;
 unmaybe = fromMaybe undefined;
 foldr c n l = flst l n (\h t -> c h (foldr c n t));
 -- foldr1' :: (a -> a -> a) -> [a] -> Maybe a
@@ -103,11 +102,7 @@ foldr1' c l =
        Nothing
        (\h t ->
           foldr
-            (\x m ->
-               Just
-                 (case m of
-                  { Nothing -> x
-                  ; Just y -> c x y}))
+            (\x m -> Just (fmaybe m x (c x)))
             Nothing
             l);
 
@@ -125,19 +120,12 @@ instance Monad [] where { return = itemize ; (>>=) = flip concatMap };
 instance Applicative [] where
   { pure = itemize
   ; (<*>) fs xs = fs >>= \f -> xs >>= \x -> return $ f x};
-prependToAll s l = case l of {
-                     []       -> [];
-                     (:) x xs -> s : x : prependToAll s xs
-};
-
-intersperse s l = case l of {
-    []       -> [];
-    (:) x xs -> x : prependToAll s xs
-};
-
+prependToAll s l = flst l [] (\x xs -> s : x : prependToAll s xs);
+intersperse s l = flst l [] (\x xs -> x : prependToAll s xs);
 
 -- Show a non-empty list
 intercalate d = concat . intersperse d;
+unwords = intercalate " ";
 showList' l = "[" ++ intercalate "," (map show l) ++ "]";
 showList l = case l of {
                []       -> "[]";
@@ -154,9 +142,6 @@ showString s = "\"" ++ mapconcat escapeC s ++ "\"";
 instance Show a => Show [a] where { show = showList };
 
 any f = foldr (\x t -> ife (f x) True t) False;
--- fold a maybe
--- fmaybe :: Maybe a -> b -> (a -> b) -> b
-fmaybe m n j = case m of { Nothing -> n; Just x -> j x };
 lookupWith eq s =
   foldr (\h t -> fpair h (\k v -> ife (eq s k) (Just v) t)) Nothing;
 
@@ -187,93 +172,214 @@ data Neat =
     [(String, (Qual, Ast))];
 
 -- Parser combinators (applicative style)
-data Parser a = Parser (String -> Maybe (a, String));
-showRes p = case p of { Nothing -> "Nothing"
-                      ; Just p -> case p of
-                                    { (,) x y -> "(" ++ show x ++ ", " ++
-                                                 show y ++ ")"}};
-parserpure a = Parser (\s -> Just (a, s));
-parse p = case p of { Parser f -> f };
-parserbind pa f = Parser $ \s ->
-            case parse pa s of
-            { Nothing -> Nothing
-            ; Just a  -> case a of
-                              { (,) x s -> parse (f x) s }};
-instance Monad Parser where
-  { return = parserpure
-  ; (>>=) = parserbind };
-parserap f x = f >>= (\b -> x >>= (\x -> parserpure (b x)));
-parserfmap f x = Parser $ \s ->
-                   case parse x s of
-                   { Nothing -> Nothing
-                   ; Just a  -> case a of
-                                { (,) x s -> Just (f x, s) }};
-instance Functor Parser where
-  { fmap = parserfmap };
+-- From the paper "Parsec: A practical parsing library"
+-- Written in a contrived way for use with mini-Haskell
+-- Position is a line, column
+data Pos = Pos Int Int;
 
-instance Applicative Parser where
-  { pure = parserpure
-  ; (<*>) = parserap };
+data State = State String Pos;
+data Parsec a = Parsec (State -> Consumed a);
+data Msg = Msg Pos String [String];
 
-(<|>) x y = Parser $ \s -> case parse x s of
-  { Nothing -> parse y s
-  ; Just x  -> Just x };
--- Using liftA2 f x y over f <$> x <*> y results in a heap usage
--- decrease of around 100
--- liftA2 f x = ap (parserfmap f x);
+data Reply a = Err Msg
+             | Ok a State Msg;
 
-item = Parser $ \s -> case s of { [] -> Nothing; (:) c cs -> Just (c,cs) };
--- sat :: (Char -> Bool) -> Parser Char
-sat p = Parser $ \s -> case s of { [] -> Nothing
-                                 ; (:) c cs ->
-                                   ife (p c) (Just (c, cs)) Nothing };
+data Consumed a = Empty    (Reply a)
+                | Consumed (Reply a);
 
-many p = liftA2 (:) p (many p) <|> pure [];
+parens s = '(':(s ++ ")");
+showPos p = case p of { Pos r c -> unwords ["row:"
+                                           , show r
+                                           , "col: "
+                                           , show c]};
+instance Show Pos where { show = showPos };
+showState s = case s of { State s p -> unwords [show s, parens (show p)]};
+instance Show State where { show = showState };
+-- showMsg m = case m of { Msg pos s1 s2 ->
+--                          unwords ["Msg", show pos, show s1, show s2]};
+
+-- instance Show Msg where
+--   { show = showMsg };
+
+-- showReply r = case r of { Err m -> unwords ["Err", show m]
+--                         ; Ok a s m -> unwords ["Ok", show a, show s, show m]};
+-- instance Show a => Show (Reply a) where { show = showReply };
+-- showConsumed c = case c of { Empty m    -> unwords ["Empty", show m]
+--                            ; Consumed m -> unwords ["Consumed", show m] };
+-- instance Show a => Show (Consumed a) where
+--   { show = showConsumed };
+-- fromString :: String -> State
+fromString s = State s (Pos 1 1);
+-- parsec :: Parsec a -> State -> Consumed a
+parsec p = case p of { Parsec f -> f };
+-- parse :: Parsec a -> String -> Consumed a
+parse p s = parsec p (fromString s);
+-- bind :: Parsec a -> (a -> Parsec b) -> Parsec b
+bind p f = Parsec $
+           \state -> case parsec p state of
+                       { Empty m ->
+                         case m of
+                           { Err msg         -> Empty (Err msg)
+                           ; Ok x state' msg -> parsec (f x) state' }
+                       ; Consumed m ->
+                         Consumed
+                         (case m of
+                         { Err msg -> Err msg
+                         ; Ok x state' msg ->
+                           case parsec (f x) state' of
+                             { Empty m    -> m
+                             ; Consumed m -> m}})};
+-- parsecpure :: a -> Parsec a
+parsecpure x = Parsec $ \state ->
+                case state of
+                { State s pos -> Empty (Ok x state (Msg pos [] [])) };
+
+instance Monad Parsec where
+  { return = parsecpure
+  ; (>>=) = bind };
+instance Functor Parsec where
+  { fmap f x = x >>= \x -> parsecpure (f x) };
+instance Applicative Parsec where
+  { pure = parsecpure
+  ; (<*>) x y = x >>= \f -> y >>= \x -> parsecpure (f x) };
+
+-- nextPos :: Pos -> Char -> Pos
+nextPos p c = case p of
+  { Pos line col ->
+    ife (c == '\n') (Pos (line + 1) 0) (Pos line (col + 1))};
+
+-- sat :: (Char -> Bool) -> Parsec Char
+sat test = Parsec $ \state ->
+                          case state of
+                          { State input pos ->
+                              case input of
+                              { [] -> Empty (Err (Msg pos "end of input" []))
+                              ; (:) c cs ->
+                                  ife (test c)
+                                  (let { newPos = nextPos pos c
+                                       ; newState = State cs newPos }
+                                    in Consumed (Ok c newState
+                                                  (Msg pos [] [])))
+                                  (Empty (Err (Msg pos [c] [])))}};
+
+
+mergeMsg m1 m2 = case m1 of
+              { Msg pos inp exp1 ->
+                  case m2 of
+                    { Msg _ _ exp2 -> Msg pos inp (exp1 ++ exp2)}};
+
+mergeOk x inp msg1 msg2 = Empty (Ok x inp (mergeMsg msg1 msg2));
+
+mergeError msg1 msg2 = Empty (Err (mergeMsg msg1 msg2));
+
+-- (<|>) :: Parsec a -> Parsec a -> Parsec a
+(<|>) p q = Parsec $
+            \state ->
+              case parsec p state of
+              { Empty m ->
+                  case m of
+                  { Err msg1 ->
+                      case parsec q state of
+                      { Empty m ->
+                        case m of
+                        { Err msg2 ->
+                          mergeError msg1 msg2
+                        ; Ok x inp msg2 ->
+                          mergeOk x inp msg1 msg2 }
+                      ; Consumed m -> Consumed m }
+                  ; Ok x inp msg1 ->
+                    case parsec q state of
+                      { Empty m ->
+                        case m of
+                          { Err msg2 ->
+                            mergeOk x inp msg1 msg2
+                          ; Ok _ _ msg2 ->
+                            mergeOk x inp msg1 msg2 }
+                      ; Consumed m -> Consumed m }}
+              ; Consumed m -> Consumed m };
+
+try p = Parsec $ \state -> case parsec p state of
+                             { Empty m -> Empty m
+                             ; Consumed m ->
+                               case m of
+                                 { Err msg ->
+                                     Empty (Err msg)
+                                 ; Ok x st msg ->
+                                     Consumed (Ok x st msg)}};
+
+(<||>) p q = try p <|> q;
+many p = liftA2 (:) p (many p) <||> pure [];
 many1 p = liftA2 (:) p (many p);
-sepBy1 p sep = liftA2 (:) p (many (sep *> p));
-sepBy p sep = sepBy1 p sep <|> pure [];
+expect m exp = case m of { Msg pos inp _ -> Msg pos inp [exp] };
 
-char c = sat (== c);
+-- (<?>) :: Parsec a -> String -> Parsec a
+(<?>) p exp = Parsec $ \state ->
+                         case parsec p state of
+                           { Empty m ->
+                               Empty
+                               (case m of
+                                   { Err msg ->
+                                       Err (expect msg exp)
+                                   ; Ok x st msg ->
+                                       Ok x st (expect msg exp)})
+                           ; Consumed m -> Consumed m };
+
+item = sat (const True);
+sepBy1 p sep = liftA2 (:) p (many (sep *> p));
+sepBy p sep = sepBy1 p sep <||> pure [];
+char c = sat (== c) <?> show c;
 string s =
   case s of
-  { [] -> pure s
+  { []       -> pure s
   ; (:) c cs -> char c *> string cs *> pure s};
 
 between x y p = x *> (p <* y);
 -- Parse line comments
 com = char '-' *> between (char '-') (char '\n') (many (sat (/= '\n')));
 -- Block comments
-notComEnd = (sat (/= '-') <|> (char '-' *> sat (/= '}'))) *> parserpure [];
-blockcom = let { content = many (blockcom <|> notComEnd) }
-           in between (string "{-") (string "-}") content *> parserpure [];
+notComEnd = (sat (/= '-') <||> (char '-' *> sat (/= '}'))) *> pure [];
+blockcom = let { content = many (blockcom <||> notComEnd) }
+           in between (string "{-") (string "-}") content *> pure [];
 sp =
   many
-    ((pure <$> sat (\c -> (c == ' ') || (c == '\n'))) <|> com <|> blockcom);
+    ((pure <$> sat (\c -> (c == ' ') || (c == '\n'))) <||> com <||> blockcom);
 spc f = f <* sp;
 spch = spc . char;
--- wantWith :: (a -> Bool) -> Parser a -> Parser a
-wantWith pred p = Parser $ \s ->
-                  case parse p s of
-                  { Nothing -> Nothing
-                  ; Just x -> case x of
-                       { (,) a s -> ife (pred a) (Just (a,s)) Nothing }};
+-- wantWith :: (a -> Bool) -> String -> Parser a -> Parser a
+wantWith pred str p = Parsec $ \s ->
+                  case parsec p s of
+                  { Empty m ->
+                    Empty (case m of
+                      { Err m -> Err m
+                      ; Ok a state' m -> ife (pred a)
+                                         (Ok a state' m)
+                                         (Err (expect m str)) })
+                  ; Consumed m ->
+                    Consumed (case m of
+                                { Err m -> Err m
+                                ; Ok a state' m -> ife (pred a)
+                                                   (Ok a state' m)
+                                                   (Err (expect m str))})
+                  };
 -- want :: Eq a => Parser a -> a -> Parser a
-want f s = wantWith (== s) f;
+want f s = wantWith (== s) s f;
 
 paren = between (spch '(') (spch ')');
-upper = sat $ \x -> ((x <= 'z') && ('a' <= x)) || (x == '_');
-lower = sat $ \x -> (x <= 'Z') && ('A' <= x);
-digit = sat $ \x -> (x <= '9') && ('0' <= x);
-varLex = liftA2 (:) upper (many (upper <|> lower <|> digit <|> char '\''));
--- Constructor identifier
-conId = spc (liftA2 (:) lower (many (upper <|> lower <|> digit <|> char '\'')));
+lower = sat (\x -> ((x <= 'z') && ('a' <= x)) || (x == '_')) <?> "lower";
+upper = sat (\x -> (x <= 'Z') && ('A' <= x)) <?> "upper";
+digit = sat (\x -> (x <= '9') && ('0' <= x)) <?> "digit";
+alpha = (lower <||> upper) <?> "alpha";
+varLex = liftA2 (:) lower (many (lower <||> upper <||> digit <||> char '\''));
+-- -- Constructor identifier
+conId = spc (liftA2 (:) upper (many (lower <||> upper <||> digit <||> char '\'')));
 keyword s = spc (want varLex s);
-varId = spc (wantWith (\s -> not ((s == "of") || (s == "where"))) varLex);
+-- TODO: Come up with better phrase than "not of or where"
+varId = spc (wantWith (\s -> not ((s == "of") || (s == "where"))) "not of or where" varLex);
 -- Operator characters
 opLex = many1 (sat (`elem` ":!#$%&*+./<=>?@\\^|-~"));
 -- Operators
-op = spc opLex <|> between (spch '`') (spch '`') varId;
-var = varId <|> paren (spc opLex);
+op = spc opLex <||> between (spch '`') (spch '`') varId;
+var = varId <||> paren (spc opLex);
 anyOne = fmap pure (spc (sat (const True)));
 
 -- Lambda
@@ -282,16 +388,16 @@ lam r =
   liftA2 (flip (foldr L)) (many1 varId) (char '-' *> (spch '>' *> r));
 
 listify = fmap (foldr (\h t -> A (A (V ":") h) t) (V "[]"));
-escChar = char '\\' *> (sat (`elem` "'\"\\") <|> (const '\n' <$> char 'n'));
-litOne delim = fmap (\c -> R ('#' : pure c)) (escChar <|> sat (/= delim));
+escChar = char '\\' *> (sat (`elem` "'\"\\") <||> (const '\n' <$> char 'n'));
+litOne delim = fmap (\c -> R ('#' : pure c)) (escChar <||> sat (/= delim));
 litInt = R . ('(' :) . (++ ")") <$> spc (many1 digit);
 litStr = listify (between (char '"') (spch '"') (many (litOne '"')));
 litChar = between (char '\'') (spch '\'') (litOne '\'');
-lit = litStr <|> litChar <|> litInt;
+lit = litStr <||> litChar <||> litInt;
 sqLst r = listify (between (spch '[') (spch ']') (sepBy r (spch ',')));
 alt r =
   (,) <$>
-  (conId <|> (pure <$> paren (spch ':' <|> spch ',')) <|>
+  (conId <||> (pure <$> paren (spch ':' <||> spch ',')) <||>
    liftA2 (:) (spch '[') (pure <$> spch ']')) <*>
   liftA2 (flip (foldr L)) (many varId) (want op "->" *> r);
 braceSep f = between (spch '{') (spch '}') (sepBy f (spch ';'));
@@ -300,18 +406,18 @@ cas' x as = foldl A (V (concatMap (('|' :) . fst) as)) (x : map snd as);
 -- Case expressions
 cas r = liftA2 cas' (between (keyword "case") (keyword "of") r) (alts r);
 thenComma r =
-  spch ',' *> (((\x y -> A (A (V ",") y) x) <$> r) <|> parserpure (A (V ",")));
+  spch ',' *> (((\x y -> A (A (V ",") y) x) <$> r) <||> pure (A (V ",")));
 
 -- Sections
 parenExpr r =
   liftA2
     (&)
     r
-    (((\v a -> A (V v) a) <$> op) <|> thenComma r <|> parserpure id);
+    (((\v a -> A (V v) a) <$> op) <||> thenComma r <||> pure id);
 
 rightSect r =
-  ((\v a -> A (A (V "\\C") (V v)) a) <$> (op <|> (pure <$> spch ','))) <*> r;
-section r = paren (parenExpr r <|> rightSect r);
+  ((\v a -> A (A (V "\\C") (V v)) a) <$> (op <||> (pure <$> spch ','))) <*> r;
+section r = paren (parenExpr r <||> rightSect r);
 
 -- Does a string occur free in the AST?
 -- isFree :: String -> Ast -> Bool
@@ -340,16 +446,16 @@ letin r =
     r;
 
 atom r =
-  letin r                                  <|>
-  sqLst r                                  <|>
-  section r                                <|>
-  cas r                                    <|>
-  lam r                                    <|>
-  (paren (spch ',') *> parserpure (V ",")) <|>
-  parserfmap V (conId <|> var)             <|>
+  letin r                                  <||>
+  sqLst r                                  <||>
+  section r                                <||>
+  cas r                                    <||>
+  lam r                                    <||>
+  (paren (spch ',') *> pure (V ",")) <||>
+  fmap V (conId <||> var)             <||>
   lit;
 
-aexp r = parserfmap (unmaybe . foldl1' A) (many1 (atom r));
+aexp r = fmap (unmaybe . foldl1' A) (many1 (atom r));
 fix f = f (fix f);
 
 -- Parse infix operators
@@ -372,7 +478,7 @@ instance Eq Assoc where { (==) = eqAssoc };
 
 precOf s precTab = fmaybe (lstLookup s precTab) 5 fst;
 assocOf s precTab = fmaybe (lstLookup s precTab) LAssoc snd;
-opWithPrec precTab n = wantWith (\s -> n == precOf s precTab) op;
+opWithPrec precTab n = wantWith (\s -> n == precOf s precTab) "precTab" op;
 -- opFold'
 --   :: [(String, (a, Assoc))] -> Ast -> [(String, Ast)] -> Maybe Ast
 opFold' precTab e xs =
@@ -387,7 +493,7 @@ opFold' precTab e xs =
           case assocOf (fst x) precTab of
           { NAssoc ->
               case xt of
-              {  [] -> Just $ fpair x (\op y -> A (A (V op) e) y)
+              {  []       -> Just $ fpair x (\op y -> A (A (V op) e) y)
               ;  (:) y yt -> Nothing }
           ; LAssoc -> Just $ foldl (\a b -> fpair b (\op y -> A (A (V op) a) y)) e xs
           ; RAssoc ->
@@ -425,12 +531,12 @@ aType =
     (liftA2
        (&)
        (_type aType)
-       ((spch ',' *> ((\a b -> TAp (TAp (TC ",") b) a) <$> _type aType)) <|>
-        parserpure id)) <|>
-  typeConstant <|>
-  (TV <$> varId) <|>
+       ((spch ',' *> ((\a b -> TAp (TAp (TC ",") b) a) <$> _type aType)) <||>
+        pure id)) <||>
+  typeConstant <||>
+  (TV <$> varId) <||>
   (spch '[' *>
-   (spch ']' *> parserpure (TC "[]") <|>
+   (spch ']' *> pure (TC "[]") <||>
     TAp (TC "[]") <$> (_type aType <* spch ']')));
 
 simpleType c vs = foldl TAp (TC c) (map TV vs);
@@ -449,9 +555,9 @@ fixityDecl kw a =
     (spch ';')
     (liftA2 (fixityList a) prec (sepBy op (spch ',')));
 fixity =
-  fixityDecl "infix" NAssoc  <|>
-  fixityDecl "infixl" LAssoc <|>
-  fixityDecl "infixr" RAssoc;
+  fixityDecl "infixl" LAssoc <||>
+  fixityDecl "infixr" RAssoc <||>
+  fixityDecl "infix" NAssoc;
 
 noQual = Qual [];
 genDecl = liftA2 (,) var (char ':' *> spch ':' *> _type aType);
@@ -467,28 +573,38 @@ inst = _type aType;
 instDecl r =
   keyword "instance" *>
   ((\ps cl ty defs -> Inst cl (Qual ps ty) defs) <$>
-   (liftA2 ((pure .) . Pred) conId (inst <* want op "=>") <|>
-    parserpure []) <*>
+   (liftA2 ((pure .) . Pred) conId (inst <* want op "=>") <||>
+    pure []) <*>
    conId <*>
    inst <*>
    (keyword "where" *> braceSep (def r)));
 
 tops precTab =
   sepBy
-    (adt <|> Def <$> def (expr precTab 0) <|> classDecl <|>
+    (adt <||> Def <$> def (expr precTab 0) <||> classDecl <||>
      instDecl (expr precTab 0))
     (spch ';');
 
 program' = sp *> (concat <$> many fixity) >>= tops;
 
-eqPre = fmaybe (parse program' $
+eqPre = case parse program' $
   "class Eq a where { (==) :: a -> a -> Bool };\n" ++
   "class Show a where { show :: a -> String };\n" ++
   "class Functor f where { fmap :: (a -> b) -> f a -> f b };\n" ++
   "class Applicative f where { pure :: a -> f a; (<*>) :: f (a -> b) -> f a -> f b };\n" ++
   "class Monad m where { return :: a -> m a ; (>>=) :: m a -> (a -> m b) -> m b};\n" ++
-  "instance Eq Int where { (==) = intEq };\n") undefined fst;
-
+  "instance Eq Int where { (==) = intEq };\n" of
+  { Empty m ->
+    case m of
+      -- TODO: replace with show msg
+      { Err msg  -> undefined
+      ; Ok l _ _ -> l}
+  ; Consumed m ->
+    case m of
+      -- TODO: replace with show msg
+      { Err msg  -> undefined
+      ; Ok l _ _ -> l}
+  };
 program =
   ((eqPre ++
       -- data [] a = [] | (:) a ([] a)
@@ -1029,19 +1145,28 @@ infer prog = fneat (untangle prog) inferDefs;
 showQual q = case q of { Qual ps t -> concatMap showPred ps ++ show t };
 
 instance Show Qual where { show = showQual };
-dumpTypes s =
-  fmaybe (parse program s) "parse error" $ \progRest ->
-    fpair progRest $ \prog rest ->
-      case infer prog of
-      { Left err -> err
-      ; Right typed ->
-          concatMap
-            (\p -> fpair p $ \s qa -> s ++ " :: " ++ show (fst qa) ++ "\n")
-            typed};
+dumpTypes' m =
+  case m of
+    { Err msg -> "parse error"
+    ; Ok prog _ _ ->
+        case infer prog of
+          { Left err -> err
+          ; Right typed ->
+              concatMap
+              (\p -> fpair p $ \s qa -> s ++ " :: " ++ show (fst qa) ++ "\n")
+              typed}};
+dumpTypes s = case parse program s of
+  { Empty m    -> dumpTypes' m
+  ; Consumed m -> dumpTypes' m };
 
-compile s =
-  fmaybe (parse program s) "parse error" $ \progRest ->
-    fpair progRest $ \prog rest ->
-      case infer prog of
-      { Left err  -> err
-      ; Right qas -> unmaybe (asm $ map (second snd) qas)};
+-- TODO: replace with show msg
+compile' m = case m of
+      { Err msg -> "parse error"
+      ; Ok prog _ _ ->
+          case infer prog of
+            { Left err  -> err
+            ; Right qas -> unmaybe (asm $ map (second snd) qas)}};
+
+compile s = case parse program s of
+  { Empty m    -> compile' m
+  ; Consumed m -> compile' m };

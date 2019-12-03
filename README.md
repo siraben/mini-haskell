@@ -4,8 +4,8 @@
 This is an elaboration and annotation of [Ben Lynn's Haskell
 compiler](https://crypto.stanford.edu/~blynn/compiler/type.html) and
 [C VM](https://crypto.stanford.edu/~blynn/compiler/c.html).  The main
-aim is to improve upon the compiler, firstly its structure and later
-optimizations to the generated code.
+aim is to improve upon the compiler, in various layers  (see [Future
+plans](#future-plans).
 
 ## Usage
 ```
@@ -33,30 +33,34 @@ optimization to code generation), run `./check_compile.sh classy.hs`
 instead.  It adds another step to the same process in `check.sh` to
 ensure that the changes propagate.
 
-## Ideas for improvement
+## <a name="future-plans">Future plans</a>
+### Bootstrapping
+- [ ] Create bootstrapping path from original classy compiler
+
 ### C runtime
 - [ ] Monadic I/O
     - [ ] putc, getc, filesystems
 - [ ] Alternate VM in Forth?
 
 ### Compiler
-Guiding principle: if a change makes the compiler self-compile with
-less heap usage, it's probably a good change.
-- [ ] Use more typeclasses in this compiler (but ensure bootstrapping
-      paths still work)
-  + Parser combinators should be a typeclass
-  + Rewrite sections in monadic style?
+Initial phase; parsing and totality, then reduce heap usage.
+
+- [x] Use more typeclasses in this compiler
 - [ ] Remove undefined, only use total functions
 - [ ] "Don't pay for what you don't use" (only emit code for functions
       referenced from main)
 - [ ] Convert to CPS and perform partial evaluation
 
 ### Parser
+- [x] Rewrite in applicative style with typeclasses
 - [x] Add block comments
+- [x] Use Parsec-style parsing
 - [ ] Better parser error messages
+  - [ ] Need show instance for Msg
 - [ ] do-notation
 
 ### Types
+- [ ] Separation of Char and Int types
 - [ ] Add more types to the standard prelude
 - [ ] Allow class constraint in class declaration
       like (class Functor f => Applicative f where ...)
