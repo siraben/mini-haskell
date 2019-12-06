@@ -16,8 +16,8 @@ char input[BUFMAX] = {0};
 u *mem, *altmem, *sp, *spTop, hp, tab[TABMAX], tabn;
 u gc_count;
 void stats() {
-  printf("[HP = %u, SP = %p, GC called %u times]\n", hp, (void*)(spTop - sp),
-         gc_count);
+  printf("[HP = %u, SP = %p, GC called %u time%s]\n", hp, (void*)(spTop - sp),
+         gc_count, gc_count == 1 ? "" : "s");
 }
 
 #define isAddr(n) (n >= 128)
@@ -415,8 +415,8 @@ int main(int argc, const char **argv) {
     init_vm();
     lvlup_file(argv[3]);
     parse(buf);
-    // get_input();
-    str = "default";
+    get_input();
+    str = input;
     run(str_get, pc);
     puts("");
     stats();

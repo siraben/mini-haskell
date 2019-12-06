@@ -4,6 +4,9 @@
 ------------------------------------------------------------------------
 -- Delete code below and uncomment the block to compile in GHC
 {-
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverlappingInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
@@ -24,6 +27,7 @@ class Applicative f where { pure :: a -> f a; (<*>) :: f (a -> b) -> f a -> f b 
 class Monad m where { return :: a -> m a ; (>>=) :: m a -> (a -> m b) -> m b};
 instance Eq Char where { (==) x y = if x Prelude.== y then True else False };
 instance Eq Int where { (==) x y = if x Prelude.== y then True else False };
+instance Show Char where { show = Prelude.show };
 infixr 5 ++;
 infixr 9 .;
 infixl 4 <*> , <$> , <* , *>;
@@ -44,6 +48,7 @@ infixl 6 + , -;
 (-) = (.-.);
 (%) = (.%.);
 (/) = (./.);
+-- Delete code above and uncomment the block to compile in GHC
 undefined = undefined;
 ($) f = f;
 id x = x;
@@ -56,6 +61,8 @@ liftA2 f x = (<*>) (fmap f x);
 (<*) = liftA2 const;
 data Bool = True | False;
 data Maybe a = Nothing | Just a;
+data Either a b = Left a | Right b;
+data Error a = Error String | Okay a;
 -- fpair = flip curry
 fpair p f = case p of { (,) x y -> f x y };
 fst p = case p of { (,) x y -> x };
@@ -67,6 +74,7 @@ not a = case a of { True -> False; False -> True };
 (.) f g x = f (g x);
 (||) f g = ife f True (ife g True False);
 (&&) f g = ife f (ife g True False) False;
+(<) a b = not (a == b) && (a <= b);
 -- fold a list
 -- flist :: [a] -> b -> (a -> [a] -> b) -> b
 flst xs n c = case xs of { [] -> n; (:) h t -> c h t };
@@ -93,7 +101,6 @@ instance Applicative Maybe where
 instance Monad Maybe where
   { return = Just ; (>>=) ma f = maybe Nothing f ma };
 fromMaybe a m = fmaybe m a id;
-unmaybe = fromMaybe undefined;
 foldr c n l = flst l n (\h t -> c h (foldr c n t));
 -- foldr1' :: (a -> a -> a) -> [a] -> Maybe a
 foldr1' c l =
@@ -138,7 +145,15 @@ escapeC c = ife (c == '\n') "\\n"
              [c]);
 showString s = "\"" ++ mapconcat escapeC s ++ "\"";
 
--- instance Show String where { show = showString };
+ifz n = ife (0 == n);
+showInt' n = ifz n id (showInt' (n/10) . (:) (chr (48+(n%10))));
+showInt n = ifz n ('0':) (showInt' n);
+
+-- N.B. using show on Ints will make GHC fail to compile to due GHC
+-- having multiple numeric types.
+instance Show Int where { show n = showInt n "" };
+
+instance Show String where { show = showString };
 instance Show a => Show [a] where { show = showList };
 
 any f = foldr (\x t -> ife (f x) True t) False;
@@ -146,7 +161,19 @@ lookupWith eq s =
   foldr (\h t -> fpair h (\k v -> ife (eq s k) (Just v) t)) Nothing;
 
 lstLookup = lookupWith (==);
-
+(!!) l i = case l of {
+             []       -> Nothing;
+             (:) x xs -> ifz i (Just x) (xs !! (i - 1))
+};
+reverse = foldl (flip (:)) [];
+zipWith f xs ys = case xs of
+  { [] -> []
+  ; (:) x xt -> case ys of
+    { [] -> []
+    ; (:) y yt -> f x y : zipWith f xt yt
+    }
+  };
+zip = zipWith (,);
 
 -- Representation of types
 --          type ctor.  type var.  type app.
@@ -158,8 +185,6 @@ data Ast
   | A Ast Ast    -- application
   | L String Ast -- lambda abstraction
   | Proof Pred;  -- proof for typeclass instantiation?
-
-data Either a b = Left a | Right b;
 
 --  * instance environment
 --  * definitions, including those of instances
@@ -455,7 +480,7 @@ atom r =
   fmap V (conId <||> var)             <||>
   lit;
 
-aexp r = fmap (unmaybe . foldl1' A) (many1 (atom r));
+aexp r = fmap (fromMaybe undefined . foldl1' A) (many1 (atom r));
 fix f = f (fix f);
 
 -- Parse infix operators
@@ -504,7 +529,7 @@ expr precTab =
   fix $ \r n ->
     ife
       (n <= 9)
-      ((unmaybe .) . opFold' precTab <$> r (succ n) <*>
+      ((fromMaybe undefined .) . opFold' precTab <$> r (succ n) <*>
        many (liftA2 (,) (opWithPrec precTab n) (r (succ n))))
       (aexp (r 0));
 
@@ -520,9 +545,9 @@ data Top = Adt Type [Constr]
 -- arrow type constructor
 arr a = TAp (TAp (TC "->") a);
 
-bType r = unmaybe . foldl1' TAp <$> many1 r;
+bType r = fromMaybe undefined . foldl1' TAp <$> many1 r;
 
-_type r = unmaybe . foldr1' arr <$> sepBy (bType r) (spc (want opLex "->"));
+_type r = fromMaybe undefined . foldr1' arr <$> sepBy (bType r) (spc (want opLex "->"));
 typeConstant =
   (\s -> ife (s == "String") (TAp (TC "[]") (TC "Int")) (TC s)) <$> conId;
 
@@ -638,24 +663,8 @@ prims =
       ] ++
       map (\s -> ('.':s ++ ".", (iii, bin s))) ["+", "-", "*", "/", "%"];
 
-ifz n = ife (0 == n);
-showInt' n = ifz n id (showInt' (n/10) . (:) (chr (48+(n%10))));
-showInt n = ifz n ('0':) (showInt' n);
-
--- N.B. using show on Ints will make GHC fail to compile to due GHC
--- having multiple numeric types.
-instance Show Int where { show n = showInt n "" };
-
--- rank :: [(String, b)] -> String -> [Char]
-rank ds v =
-  foldr
-    (\d t -> ife (v == fst d) (\n -> '[' : showInt n "]") (t . succ))
-    undefined
-    ds
-    0;
-
 -- Total variant
-rank' ds v =
+rank ds v =
   let { loop l v c =
          case l of
          { [] -> Nothing
@@ -667,7 +676,7 @@ rank' ds v =
 -- Total version of showC
 showC ds t = case t of
   { R s     -> Just s
-  ; V v     -> rank' ds v
+  ; V v     -> rank ds v
   ; A x y   -> liftA2 (\a b -> '`':a ++ b) (showC ds x) (showC ds y)
   ; L w t   -> Nothing
   ; Proof _ -> Nothing
@@ -680,11 +689,12 @@ data LC = Ze | Su LC | Pass Ast | La LC | App LC LC;
 -- Convert the AST into a nameless representation
 -- debruijn :: [String] -> Ast ->  LC
 debruijn n e = case e of
-  { R s     -> Pass (R s)
-  ; V v     -> foldr (\h m -> ife (h == v) Ze (Su m)) (Pass (V v)) n
-  ; A x y   -> App (debruijn n x) (debruijn n y)
-  ; L s t   -> La (debruijn (s:n) t)
-  ; Proof _ -> undefined
+  { R s     -> return $ Pass (R s)
+  ; V v     -> return $ foldr (\h m -> ife (h == v) Ze (Su m)) (Pass (V v)) n
+  ; A x y   -> App <$> debruijn n x <*> debruijn n y
+  ; L s t   -> (debruijn (s:n) t) >>= \x ->
+               return (La x)
+  ; Proof _ -> Nothing
   };
 
 -- See Kiselyov's paper - "Lambda to SKI, semantically", pages 10 - 11
@@ -784,7 +794,8 @@ babs t = case t of
 -- Convert an AST into debruijn form, then perform bracket abstraction,
 -- return if and only if we have a closed form.
 -- nolam :: Ast -> Maybe Ast
-nolam x = case babs (debruijn [] x) of
+nolam x = debruijn [] x >>= \x ->
+  case babs x of
   { Defer    -> Nothing
   ; Closed d -> Just d
   ; Need e   -> Nothing
@@ -966,23 +977,17 @@ merge s1 s2 =
 
 match h t = case h of
   { TC a -> case t of
-    { TC b    -> ife (a == b) (Just []) Nothing
+    { TC b    -> ife (a == b) (return []) Nothing
     ; TV b    -> Nothing
     ; TAp a b -> Nothing
     }
-  ; TV a -> Just [(a, t)]
+  ; TV a -> return [(a, t)]
   ; TAp a b -> case t of
     { TC b -> Nothing
     ; TV b -> Nothing
-    ; TAp c d -> case match a c of
-      { Nothing -> Nothing
-      ; Just ac -> case match b d of
-        { Nothing -> Nothing
-        ; Just bd -> merge ac bd
-        }
-      }
-    }
-  };
+    ; TAp c d -> match a c >>= \ac ->
+                 match b d >>= \bd ->
+                 merge ac bd}};
 
 matchPred h p = case p of { Pred _ t -> match h t };
 
@@ -1080,8 +1085,7 @@ inferInst ienv typed inst = fpair inst $ \cl qds -> fpair qds $ \q ds ->
     (fst $ dictVars ps 0)
   )
   };
-
-reverse = foldl (flip (:)) [];
+  
 inferDefs ienv defs typed =
   flst defs (Right $ reverse typed) $ \edef rest ->
     case edef of
@@ -1165,7 +1169,7 @@ compile' m = case m of
       ; Ok prog _ _ ->
           case infer prog of
             { Left err  -> err
-            ; Right qas -> unmaybe (asm $ map (second snd) qas)}};
+            ; Right qas -> fromMaybe undefined (asm $ map (second snd) qas)}};
 
 compile s = case parse program s of
   { Empty m    -> compile' m
