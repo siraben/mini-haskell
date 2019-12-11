@@ -4,8 +4,7 @@
 This is an elaboration and annotation of [Ben Lynn's Haskell
 compiler](https://crypto.stanford.edu/~blynn/compiler/type.html) and
 [C VM](https://crypto.stanford.edu/~blynn/compiler/c.html).  The main
-aim is to improve upon the compiler, in various layers  (see [Future
-plans](#future-plans).
+aim is to improve upon the compiler, in various layers (see [Future plans](#future-plans)).
 
 ## Usage
 ```

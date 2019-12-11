@@ -177,10 +177,9 @@ willOverflow a b = (base - 1) < (a + b);
 -- Increment a Nat list.
 inc' l = case l of { [] -> [1]
                    ; (:) x xs ->
-                       ife (x == base)
+                       ife (x == (base - 1))
                             (0 : inc' xs)
                             (x + 1 : xs)};
--- add, CPS version.
 add' a b = case a of
              { [] -> b
              ; (:) x xs ->

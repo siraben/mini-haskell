@@ -102,6 +102,10 @@ instance Monad Maybe where
   { return = Just ; (>>=) ma f = maybe Nothing f ma };
 fromMaybe a m = fmaybe m a id;
 foldr c n l = flst l n (\h t -> c h (foldr c n t));
+-- TODO: foldr1 should have type 
+-- foldr1 :: Monoid a => (a -> a -> a) -> [a] -> a
+-- Later, when we add foldables and traversables, it should be
+-- foldr1 :: (Monoid m, Foldable t) => (m -> m -> m) -> t m -> m
 -- foldr1' :: (a -> a -> a) -> [a] -> Maybe a
 foldr1' c l =
     flst
@@ -115,6 +119,7 @@ foldr1' c l =
 
 foldl f a bs = foldr (\b g x -> g (f x b)) id bs a;
 -- foldl1' :: (p -> p -> p) -> [p] -> Maybe p
+-- See above comments on the status of foldr1'
 foldl1' f l = flst l Nothing (\x xs -> Just (foldl f x xs));
 elem k = foldr (\x t -> ife (x == k) True t) False;
 find f = foldr (\x t -> ife (f x) (Just x) t) Nothing;
@@ -157,18 +162,18 @@ instance Show String where { show = showString };
 instance Show a => Show [a] where { show = showList };
 
 any f = foldr (\x t -> ife (f x) True t) False;
+-- lookupWith :: (a -> b -> Bool) -> a -> [(b, a)] -> Maybe a
 lookupWith eq s =
   foldr (\h t -> fpair h (\k v -> ife (eq s k) (Just v) t)) Nothing;
 
 lstLookup = lookupWith (==);
-(!!) l i = case l of {
-             []       -> Nothing;
-             (:) x xs -> ifz i (Just x) (xs !! (i - 1))
-};
+
 reverse = foldl (flip (:)) [];
-zipWith f xs ys = case xs of
+zipWith f xs ys =
+  case xs of
   { [] -> []
-  ; (:) x xt -> case ys of
+  ; (:) x xt ->
+    case ys of
     { [] -> []
     ; (:) y yt -> f x y : zipWith f xt yt
     }
@@ -198,7 +203,9 @@ data Neat =
 
 -- Parser combinators (applicative style)
 -- From the paper "Parsec: A practical parsing library"
--- Written in a contrived way for use with mini-Haskell
+-- Written in a contrived way for use with mini-Haskell (e.g. no
+-- nested pattern matching)
+
 -- Position is a line, column
 data Pos = Pos Int Int;
 
@@ -213,10 +220,8 @@ data Consumed a = Empty    (Reply a)
                 | Consumed (Reply a);
 
 parens s = '(':(s ++ ")");
-showPos p = case p of { Pos r c -> unwords ["row:"
-                                           , show r
-                                           , "col: "
-                                           , show c]};
+showPos p = case p of { Pos r c -> unwords ["row:" , show r
+                                           , "col: " , show c]};
 instance Show Pos where { show = showPos };
 showState s = case s of { State s p -> unwords [show s, parens (show p)]};
 instance Show State where { show = showState };
@@ -298,6 +303,11 @@ mergeOk x inp msg1 msg2 = Empty (Ok x inp (mergeMsg msg1 msg2));
 mergeError msg1 msg2 = Empty (Err (mergeMsg msg1 msg2));
 
 -- (<|>) :: Parsec a -> Parsec a -> Parsec a
+
+-- Given two parsers p, q, run p on the input. If it fails, then
+-- continue by running q. The input is not backtracked before running
+-- q.
+-- p <|> q ::= <p> | <q>
 (<|>) p q = Parsec $
             \state ->
               case parsec p state of
@@ -323,6 +333,8 @@ mergeError msg1 msg2 = Empty (Err (mergeMsg msg1 msg2));
                       ; Consumed m -> Consumed m }}
               ; Consumed m -> Consumed m };
 
+-- Run parser p, if it consumed input and failed, pretend like it
+-- didn't consume anything.
 try p = Parsec $ \state -> case parsec p state of
                              { Empty m -> Empty m
                              ; Consumed m ->
@@ -333,7 +345,9 @@ try p = Parsec $ \state -> case parsec p state of
                                      Consumed (Ok x st msg)}};
 
 (<||>) p q = try p <|> q;
+-- many p ::= <p>*
 many p = liftA2 (:) p (many p) <||> pure [];
+-- many1 p ::= <p>+
 many1 p = liftA2 (:) p (many p);
 expect m exp = case m of { Msg pos inp _ -> Msg pos inp [exp] };
 
@@ -348,29 +362,39 @@ expect m exp = case m of { Msg pos inp _ -> Msg pos inp [exp] };
                                    ; Ok x st msg ->
                                        Ok x st (expect msg exp)})
                            ; Consumed m -> Consumed m };
-
 item = sat (const True);
+-- sepBy1 p sep ::= <p> (<sep> <p>)*
 sepBy1 p sep = liftA2 (:) p (many (sep *> p));
 sepBy p sep = sepBy1 p sep <||> pure [];
 char c = sat (== c) <?> show c;
 string s =
   case s of
-  { []       -> pure s
+  { []       -> pure []
   ; (:) c cs -> char c *> string cs *> pure s};
 
+-- between x y p ::=  <x> <p> <y>
 between x y p = x *> (p <* y);
 -- Parse line comments
+-- com ::= '-' '-' <char c: c != '\n'>* '\n'
 com = char '-' *> between (char '-') (char '\n') (many (sat (/= '\n')));
 -- Block comments
-notComEnd = (sat (/= '-') <||> (char '-' *> sat (/= '}'))) *> pure [];
+-- notComEnd ::= <char c: c != '-'> | '-' <char c: c != '}'>
+notComEnd = (sat (/= '-') <|> (char '-' *> sat (/= '}'))) *> pure [];
+-- blockcom ::= "{-" (<blockcom> | <notComEnd>) "-}"
 blockcom = let { content = many (blockcom <||> notComEnd) }
            in between (string "{-") (string "-}") content *> pure [];
+-- Parse whitespace
 sp =
   many
-    ((pure <$> sat (\c -> (c == ' ') || (c == '\n'))) <||> com <||> blockcom);
-spc f = f <* sp;
-spch = spc . char;
+    ((pure <$> sat (\c -> (c == ' ') || (c == '\n'))) <|> com <|> blockcom);
+-- Tokenize a parser, producing a parser that consumes trailing
+-- whitespace.
+-- tok p ::= <p> <sp>
+tok p = p <* sp;
+-- Parse a character (tokenized)
+tokc = tok . char;
 -- wantWith :: (a -> Bool) -> String -> Parser a -> Parser a
+-- TODO: Consider backtracking the input on failure (similar to sat)?
 wantWith pred str p = Parsec $ \s ->
                   case parsec p s of
                   { Empty m ->
@@ -382,70 +406,90 @@ wantWith pred str p = Parsec $ \s ->
                   ; Consumed m ->
                     Consumed (case m of
                                 { Err m -> Err m
-                                ; Ok a state' m -> ife (pred a)
-                                                   (Ok a state' m)
-                                                   (Err (expect m str))})
+                                ; Ok a state' m ->
+                                    ife (pred a)
+                                        (Ok a state' m)
+                                        (Err (expect m str))})
                   };
 -- want :: Eq a => Parser a -> a -> Parser a
 want f s = wantWith (== s) s f;
-
-paren = between (spch '(') (spch ')');
+-- paren a ::= '(' <a> ')'
+paren = between (tokc '(') (tokc ')');
+-- lower ::= 'a' | 'b' | 'c' ... 'z' | '_'
 lower = sat (\x -> ((x <= 'z') && ('a' <= x)) || (x == '_')) <?> "lower";
+-- upper ::= 'A' | 'B' | 'C' ... 'Z'
 upper = sat (\x -> (x <= 'Z') && ('A' <= x)) <?> "upper";
+-- digit ::= '0' | '1' | '2' ... '9'
 digit = sat (\x -> (x <= '9') && ('0' <= x)) <?> "digit";
-alpha = (lower <||> upper) <?> "alpha";
-varLex = liftA2 (:) lower (many (lower <||> upper <||> digit <||> char '\''));
--- -- Constructor identifier
-conId = spc (liftA2 (:) upper (many (lower <||> upper <||> digit <||> char '\'')));
-keyword s = spc (want varLex s);
--- TODO: Come up with better phrase than "not of or where"
-varId = spc (wantWith (\s -> not ((s == "of") || (s == "where"))) "not of or where" varLex);
+-- alpha ::= <lower> | <upper>
+alpha = (lower <|> upper) <?> "alpha";
+-- varLex ::= <lower> (<alpha> | <digit> | '\'')*
+varLex = liftA2 (:) lower (many (alpha <|> digit <|> char '\''));
+-- Constructor identifier
+conId = tok (liftA2 (:) upper (many (alpha <|> digit <|> char '\'')));
+keyword s = tok (want varLex s);
+varId = tok (wantWith (\s -> not ((s == "of") || (s == "where"))) "variable" varLex);
 -- Operator characters
 opLex = many1 (sat (`elem` ":!#$%&*+./<=>?@\\^|-~"));
 -- Operators
-op = spc opLex <||> between (spch '`') (spch '`') varId;
-var = varId <||> paren (spc opLex);
-anyOne = fmap pure (spc (sat (const True)));
-
+op = tok opLex <|> between (tokc '`') (tokc '`') varId;
+var = varId <|> paren (tok opLex);
+anyOne = pure <$> tok (sat (const True));
 -- Lambda
+-- lam r ::= '\\' <varId>+ "->" <r>
 lam r =
-  spch '\\' *>
-  liftA2 (flip (foldr L)) (many1 varId) (char '-' *> (spch '>' *> r));
+  tokc '\\' *>
+  liftA2 (flip (foldr L)) (many1 varId) (char '-' *> (tokc '>' *> r));
 
 listify = fmap (foldr (\h t -> A (A (V ":") h) t) (V "[]"));
-escChar = char '\\' *> (sat (`elem` "'\"\\") <||> (const '\n' <$> char 'n'));
-litOne delim = fmap (\c -> R ('#' : pure c)) (escChar <||> sat (/= delim));
-litInt = R . ('(' :) . (++ ")") <$> spc (many1 digit);
-litStr = listify (between (char '"') (spch '"') (many (litOne '"')));
-litChar = between (char '\'') (spch '\'') (litOne '\'');
-lit = litStr <||> litChar <||> litInt;
-sqLst r = listify (between (spch '[') (spch ']') (sepBy r (spch ',')));
+-- Escape characters
+escChar = char '\\' *> (sat (`elem` "'\"\\") <|> (const '\n' <$> char 'n'));
+litOne delim = (\c -> R ('#' : pure c)) <$> (escChar <||> sat (/= delim));
+-- Integer literals
+litInt = R . ('(' :) . (++ ")") <$> tok (many1 digit);
+-- String literals
+-- Notice that we do not consume whitespace after parsing the first ",
+-- hence the use of char.
+litStr = listify (between (char '"') (tokc '"') (many (litOne '"')));
+-- Character literals
+litChar = between (char '\'') (tokc '\'') (litOne '\'');
+lit = litStr <|> litChar <|> litInt;
+-- sqLst r ::= '[' <sepBy r ','> ']'
+sqLst r = listify (between (tokc '[') (tokc ']') (sepBy r (tokc ',')));
+-- alt r ::= ((<conId> | '(' (':' | ',') ')') | "[]") <varId>* "->" r
 alt r =
   (,) <$>
-  (conId <||> (pure <$> paren (spch ':' <||> spch ',')) <||>
-   liftA2 (:) (spch '[') (pure <$> spch ']')) <*>
-  liftA2 (flip (foldr L)) (many varId) (want op "->" *> r);
-braceSep f = between (spch '{') (spch '}') (sepBy f (spch ';'));
+  (conId <||> (pure <$> paren (tokc ':' <|> tokc ',')) <||>
+   liftA2 (:) (tokc '[') (pure <$> tokc ']')) <*>
+  liftA2 (flip (foldr L)) (many varId) (char '-' *> (tokc '>' *> r));
+-- braceSep f ::= '{' <sepBy f ';'> '}'
+braceSep f = between (tokc '{') (tokc '}') (sepBy f (tokc ';'));
+-- alts r ::= <braceSep <alt r>>
 alts r = braceSep (alt r);
 cas' x as = foldl A (V (concatMap (('|' :) . fst) as)) (x : map snd as);
 -- Case expressions
+-- cas r ::= "case" r "of" <alts r>
 cas r = liftA2 cas' (between (keyword "case") (keyword "of") r) (alts r);
+-- thenComma r ::= ',' <r>
 thenComma r =
-  spch ',' *> (((\x y -> A (A (V ",") y) x) <$> r) <||> pure (A (V ",")));
-
--- Sections
+  tokc ',' *> (((\x y -> A (A (V ",") y) x) <$> r) <||> pure (A (V ",")));
+-- parenExpr r ::= <r> (<op> | <thenComma r>)
 parenExpr r =
   liftA2
     (&)
     r
     (((\v a -> A (V v) a) <$> op) <||> thenComma r <||> pure id);
 
+-- rightSect r ::= (<op> | ',') <r>
 rightSect r =
-  ((\v a -> A (A (V "\\C") (V v)) a) <$> (op <||> (pure <$> spch ','))) <*> r;
-section r = paren (parenExpr r <||> rightSect r);
+  ((\v a -> A (A (V "\\C") (V v)) a) <$> (op <|> (pure <$> tokc ','))) <*> r;
 
--- Does a string occur free in the AST?
+-- Sections
+-- section ::= '(' (<parenExpr r> | <rightSect r>) ')'
+section r = paren (parenExpr r <|> rightSect r);
+
 -- isFree :: String -> Ast -> Bool
+-- Checks if a string v occurs free in expr.
 isFree v expr = case expr of
   { R s     -> False
   ; V s     -> s == v
@@ -456,31 +500,34 @@ isFree v expr = case expr of
 
 maybeFix s x = ife (isFree s x) (A (V "\\Y") (L s x)) x;
 
+-- Definitions
+-- def r ::= <var> <varId>* '=' <r>
 def r =
-  liftA2 (,) var (flip (foldr L) <$> many varId <*> (spch '=' *> r));
+  liftA2 (,) var (flip (foldr L) <$> many varId <*> (tokc '=' *> r));
 
 -- Convert a list of let bindings and the let body into a single AST.
 addLets ls x =
   foldr (\p t -> fpair p (\name def -> A (L name t) $ maybeFix name def)) x ls;
 
--- Parse lets
+-- let r ::= "let" '{' <sepBy def r> '}' "in" <r>
 letin r =
   liftA2
     addLets
     (between (keyword "let") (keyword "in") (braceSep (def r)))
     r;
-
+-- atom r ::= <letin r> | <sqLst r> | <cas r> | <lam r> | <section r>
+--          | '(' ',' ')' | (<conId> | <var>) | <lit>
 atom r =
-  letin r                                  <||>
-  sqLst r                                  <||>
-  section r                                <||>
-  cas r                                    <||>
-  lam r                                    <||>
-  (paren (spch ',') *> pure (V ",")) <||>
-  fmap V (conId <||> var)             <||>
+  letin r                             <|>
+  sqLst r                             <||>
+  cas r                               <|>
+  lam r                               <||>
+  section r                           <||>
+  (paren (tokc ',') *> pure (V ","))  <||>
+  (V <$> (conId <|> var))             <||>
   lit;
 
-aexp r = fmap (fromMaybe undefined . foldl1' A) (many1 (atom r));
+aexp r = fromMaybe undefined . foldl1' A <$> many1 (atom r);
 fix f = f (fix f);
 
 -- Parse infix operators
@@ -544,10 +591,11 @@ data Top = Adt Type [Constr]
 
 -- arrow type constructor
 arr a = TAp (TAp (TC "->") a);
-
+-- Parse type applications
 bType r = fromMaybe undefined . foldl1' TAp <$> many1 r;
 
-_type r = fromMaybe undefined . foldr1' arr <$> sepBy (bType r) (spc (want opLex "->"));
+-- Parse types
+_type r = fromMaybe undefined . foldr1' arr <$> sepBy (bType r) (tok (want opLex "->"));
 typeConstant =
   (\s -> ife (s == "String") (TAp (TC "[]") (TC "Int")) (TC s)) <$> conId;
 
@@ -556,60 +604,77 @@ aType =
     (liftA2
        (&)
        (_type aType)
-       ((spch ',' *> ((\a b -> TAp (TAp (TC ",") b) a) <$> _type aType)) <||>
+       ((tokc ',' *> ((\a b -> TAp (TAp (TC ",") b) a) <$> _type aType)) <||>
         pure id)) <||>
   typeConstant <||>
   (TV <$> varId) <||>
-  (spch '[' *>
-   (spch ']' *> pure (TC "[]") <||>
-    TAp (TC "[]") <$> (_type aType <* spch ']')));
+  (tokc '[' *>
+   (tokc ']' *> pure (TC "[]") <||>
+    TAp (TC "[]") <$> (_type aType <* tokc ']')));
 
 simpleType c vs = foldl TAp (TC c) (map TV vs);
-
+-- Data declarations
+-- TODO: Add type, newtype declarations, deriving?
+-- adt ::= "data" '=' <conId> <varId>* <sepBy (<conId> | <aType>*) '|'>
 adt =
   liftA2
     Adt
-    (between (keyword "data") (spch '=') (liftA2 simpleType conId (many varId)))
-    (sepBy (liftA2 Constr conId (many aType)) (spch '|'));
+    (between (keyword "data") (tokc '=') (liftA2 simpleType conId (many varId)))
+    (sepBy (liftA2 Constr conId (many aType)) (tokc '|'));
 
-prec = (\c -> ord c - ord '0') <$> spc digit;
-fixityList a n = map (, (n, a));
+-- Precedence
+-- prec ::= <digit> <sp>
+prec = (\c -> ord c - ord '0') <$> tok digit;
+fixityList a n = fmap (, (n, a));
+-- Fixity declaration
+-- fixityDecl "kw" a ::= "kw" <prec> <sepBy <op> ','> ';'
 fixityDecl kw a =
   between
     (keyword kw)
-    (spch ';')
-    (liftA2 (fixityList a) prec (sepBy op (spch ',')));
+    (tokc ';')
+    (liftA2 (fixityList a) prec (sepBy op (tokc ',')));
+
 fixity =
   fixityDecl "infixl" LAssoc <||>
   fixityDecl "infixr" RAssoc <||>
   fixityDecl "infix" NAssoc;
 
 noQual = Qual [];
-genDecl = liftA2 (,) var (char ':' *> spch ':' *> _type aType);
+-- genDecl ::= "::" <_type aType>
+genDecl = liftA2 (,) var (char ':' *> tokc ':' *> _type aType);
 
 -- Class declarations
+-- classDecl ::= "class" <conId> <varId> "where" <braceSep genDecl>
 classDecl =
   keyword "class" *>
   (Class <$> conId <*> (TV <$> varId) <*> (keyword "where" *> braceSep genDecl));
 
+-- inst ::= <_type aType>
 inst = _type aType;
 
 -- Instance declarations
+-- instDecl r ::= "instance" (<conId> <inst> "=>")? <conId> <inst>
+--                "where" <braceSep <def f>>
 instDecl r =
   keyword "instance" *>
   ((\ps cl ty defs -> Inst cl (Qual ps ty) defs) <$>
-   (liftA2 ((pure .) . Pred) conId (inst <* want op "=>") <||>
+   (liftA2 ((pure .) . Pred) conId (inst <* (char '=' *> tokc '>')) <||>
     pure []) <*>
    conId <*>
    inst <*>
    (keyword "where" *> braceSep (def r)));
 
+-- Top level declarations
+-- tops ::= <sepBy (<adt> | <def> | <classDecl> | <instDecl>) ';'>
 tops precTab =
   sepBy
     (adt <||> Def <$> def (expr precTab 0) <||> classDecl <||>
      instDecl (expr precTab 0))
-    (spch ';');
+    (tokc ';');
 
+-- A program consists of whitespace, followed by fixity declarations,
+-- then top level declarations
+-- program' ::= <sp> <fixity>* <tops>
 program' = sp *> (concat <$> many fixity) >>= tops;
 
 eqPre = case parse program' $
@@ -689,11 +754,10 @@ data LC = Ze | Su LC | Pass Ast | La LC | App LC LC;
 -- Convert the AST into a nameless representation
 -- debruijn :: [String] -> Ast ->  LC
 debruijn n e = case e of
-  { R s     -> return $ Pass (R s)
-  ; V v     -> return $ foldr (\h m -> ife (h == v) Ze (Su m)) (Pass (V v)) n
+  { R s     -> pure $ Pass (R s)
+  ; V v     -> pure $ foldr (\h m -> ife (h == v) Ze (Su m)) (Pass (V v)) n
   ; A x y   -> App <$> debruijn n x <*> debruijn n y
-  ; L s t   -> (debruijn (s:n) t) >>= \x ->
-               return (La x)
+  ; L s t   -> La <$> debruijn (s:n) t
   ; Proof _ -> Nothing
   };
 
@@ -816,7 +880,7 @@ asm ds = dump ds ds;
 -- Apply substitutions to a tree
 apply sub t = case t of
   { TC v    -> t
-    -- Lookup v in the substitutions, if found, replace it with t
+    -- Lookup v in the substitutions, if not found, replace it with t
   ; TV v    -> fromMaybe t (lstLookup v sub)
   ; TAp a b -> TAp (apply sub a) (apply sub b)
   };
