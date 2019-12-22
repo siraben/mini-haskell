@@ -1,2 +1,2 @@
 all:
-	gcc -O3 -o blynn blynn.c
+	gcc -ansi -O3 -o blynn blynn.c

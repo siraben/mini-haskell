@@ -654,7 +654,7 @@ inst = _type aType;
 
 -- Instance declarations
 -- instDecl r ::= "instance" (<conId> <inst> "=>")? <conId> <inst>
---                "where" <braceSep <def f>>
+--                "where" <braceSep <def r>>
 instDecl r =
   keyword "instance" *>
   ((\ps cl ty defs -> Inst cl (Qual ps ty) defs) <$>

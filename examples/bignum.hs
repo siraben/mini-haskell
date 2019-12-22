@@ -186,9 +186,7 @@ add' a b = case a of
                case b of
                  { [] -> a
                  ; (:) y ys ->
-                   ((x + y)%base):(ife (willOverflow x y)
-                                   (inc' (add' xs ys))
-                                   (add' xs ys))
+                   ((x + y)%base):((ife (willOverflow x y) inc' id) (add' xs ys))
                  }};
 add a b = Nat (add' (unwrap a) (unwrap b));
 -- Since for any n > 0, Nat (replicate n 0) represents 0, we must
@@ -259,8 +257,8 @@ mul x y = case unwrap x of
                         add (shift ((digits / 2) * 2) z2)
                         (add z0 (shift (digits / 2) (sub (sub z1 z2) z0))))}};
 fibs = Nat [] : Nat [1] : zipWith add fibs (tail fibs);
-numsFrom n = n : (numsFrom (add (Nat [1]) n));
-intsFrom n = n : (intsFrom (succ n));
+numsFrom n = n : numsFrom (add (Nat [1]) n);
+intsFrom n = n : intsFrom (succ n);
 facs = scanl mul (Nat [1]) (numsFrom (Nat [1]));
 take n l = ifz n [] (case l of { [] -> [] ; (:) x xs -> x : take (n - 1) xs });
 main s = concat ["The 3000th Fibonacci number is\n", show (fibs !! 3000),

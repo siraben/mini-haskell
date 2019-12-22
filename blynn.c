@@ -71,24 +71,24 @@ u copy(u n) {
   return z;
 }
 
-// Garbage collection
+/* Garbage collection */
 void gc() {
-  // Reset the heap pointer
+  /* Reset the heap pointer */
   hp = 128;
-  // Set the stack pointer to point to the top of altmem
+  /* Set the stack pointer to point to the top of altmem */
   sp = altmem + TOP - 1;
-  // Run copy starting from the top of the old stack
+  /* Run copy starting from the top of the old stack */
   *sp = copy(*spTop);
   spTop = sp;
-  // Swap the addresses of mem and altmem
+  /* Swap the addresses of mem and altmem */
   u *tmp = mem;
   mem = altmem;
   altmem = tmp;
   gc_count++;
 }
 
-// An application of two nodes is represented by adjacent memory
-// locations.
+/* An application of two nodes is represented by adjacent memory */
+/* locations. */
 u app(u f, u x) {
   mem[hp] = f;
   mem[hp + 1] = x;
@@ -153,12 +153,12 @@ void parse(char *s) {
   parseMore(str_get);
 }
 
-// Since we store application nodes as [f, x] in adjacent memory
-// locations, we can get the nth argument by:
+/* Since we store application nodes as [f, x] in adjacent memory */
+/* locations, we can get the nth argument by: */
 u arg(u n) { return mem[sp[n] + 1]; }
 
-// If the argument is a number, then we call arg to get the pointer to
-// the number in memory, then find its value by indexing into mem.
+/* If the argument is a number, then we call arg to get the pointer to */
+/* the number in memory, then find its value by indexing into mem. */
 u num(u n) { return mem[arg(n) + 1]; }
 
 void lazy(u height, u f, u x) {
@@ -173,7 +173,7 @@ u apparg(u i, u j) { return app(arg(i), arg(j)); }
 void run(u (*get)(), void (*put)(u)) {
   u c;
   for (;;) {
-    // static int ctr; if (++ctr == (1<<25)) stats(), ctr = 0;
+    /* static int ctr; if (++ctr == (1<<25)) stats(), ctr = 0; */
     if (mem + hp > sp - 8)
       gc();
     u x = *sp;
@@ -187,60 +187,60 @@ void run(u (*get)(), void (*put)(u)) {
       case '.':
         return;
       case 'Y':
-        // fix
-        // Y x = x (x (x ...))
+        /* fix */
+        /* Y x = x (x (x ...)) */
         lazy(1, arg(1), sp[1]);
         break;
       case 'S':
-        // ap
-        // S x y z = x z (y z)
+        /* ap */
+        /* S x y z = x z (y z) */
         lazy(3, apparg(1, 3), apparg(2, 3));
         break;
       case 'B':
-        // (.)
-        // B x y z = x (y z)
+        /* (.) */
+        /* B x y z = x (y z) */
         lazy(3, arg(1), apparg(2, 3));
         break;
       case 'C':
-        // flip
-        // C x y z = x z y
+        /* flip */
+        /* C x y z = x z y */
         lazy(3, apparg(1, 3), arg(2));
         break;
       case 'R':
-        // flip flip
-        // R x y z = y z x
+        /* flip flip */
+        /* R x y z = y z x */
         lazy(3, apparg(2, 3), arg(1));
         break;
       case 'I':
-        // id
-        // I x = x
+        /* id */
+        /* I x = x */
         sp[1] = arg(1);
         sp++;
         break;
       case 'T':
-        // (&)
-        // T x y = y x
+        /* (&) */
+        /* T x y = y x */
         lazy(2, arg(2), arg(1));
         break;
       case 'K':
-        // K x y = x
+        /* K x y = x */
         lazy(2, 'I', arg(1));
         break;
       case ':':
-        // "cons"
-        // : a b c d = (d a) b
+        /* "cons" */
+        /* : a b c d = (d a) b */
         lazy(4, apparg(4, 1), arg(2));
         break;
       case '0':
-        // Read a character c from the input
-        // If c == 0, then I K (represents nil)
-        // else : (# c) (0 ?)  (represents a list of the first
-        //                      character and the rest of the input)
+        /* Read a character c from the input */
+        /* If c == 0, then I K (represents nil) */
+        /* else : (# c) (0 ?)  (represents a list of the first */
+        /*                      character and the rest of the input) */
         c = get();
         !c ? lazy(1, 'I', 'K') : lazy(1, app(':', app('#', c)), app('0', '?'));
         break;
       case '#':
-        // reduce # n f to f (# n)
+        /* reduce # n f to f (# n) */
         lazy(2, arg(2), sp[1]);
         break;
       case '1':
@@ -277,13 +277,13 @@ void run(u (*get)(), void (*put)(u)) {
       case '^':
         lazy(2, '#', num(1) ^ num(2));        
       case 'G':
-        // getc k w = k n w
-        // Where k is the continuation, w is the "world"
+        /* getc k w = k n w */
+        /* Where k is the continuation, w is the "world" */
         lazy(2, app(arg(1), getchar()), arg(2));
         break;
       case 'P':
-        // putc n k w = k w
-        // k is the continuation, w is the "world"
+        /* putc n k w = k w */
+        /* k is the continuation, w is the "world" */
         putchar(num(1));
         lazy(3, arg(2),arg(3));
         break;
@@ -391,22 +391,22 @@ int main(int argc, const char **argv) {
   fclose(f);
   init_vm();
 
-  // Load lvlup_file into memory
+  /* Load lvlup_file into memory */
   lvlup_file(argv[1]);
   stats();
-  // Parse the lvlup_file. (upgrades the compiler from ION assembly to
-  // a subset of Haskell)
+  /* Parse the lvlup_file. (upgrades the compiler from ION assembly to */
+  /* a subset of Haskell) */
   parse(buf);
 
-  // Reset the input file to be argv[1], and open as writable.
+  /* Reset the input file to be argv[1], and open as writable. */
   fp_reset(argv[2]);
   file = fopen(argv[3], "w");
-  // Run it!  Input comes from the file argv[1], output goes to the
-  // file argv[2].
+  /* Run it!  Input comes from the file argv[1], output goes to the */
+  /* file argv[2]. */
   run(fp_get, pcFile);
   fclose(file);
   printf("Input file compiled.\n");
-  printf("Run binary on input from stdin? [y/n] ");
+  printf("Run binary on input from stdin? [Y/n] ");
   fflush(stdout);
 
   get_input();
@@ -415,6 +415,8 @@ int main(int argc, const char **argv) {
     init_vm();
     lvlup_file(argv[3]);
     parse(buf);
+    printf("Input: ");
+    fflush(stdout);
     get_input();
     str = input;
     run(str_get, pc);
